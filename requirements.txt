@@ -1,0 +1,4 @@
+Django>=4.2,<4.3
+djangorestframework>=3.15,<3.16
+psycopg2-binary>=2.9,<3.0
+pypdf>=4.2,<5.0
