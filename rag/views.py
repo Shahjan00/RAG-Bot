@@ -3,7 +3,8 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import DocumentUploadSerializer
+from .serializers import DocumentUploadSerializer, QuestionSearchSerializer
+from .services.vector_store import search_similar_chunks
 
 
 class DocumentUploadView(APIView):
@@ -23,4 +24,23 @@ class DocumentUploadView(APIView):
                 "chunk_count": document.chunks.count(),
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class QuestionSearchView(APIView):
+    def post(self, request):
+        serializer = QuestionSearchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        question = serializer.validated_data["question"]
+        top_k = serializer.validated_data["top_k"]
+        matches = search_similar_chunks(question, limit=top_k)
+
+        return Response(
+            {
+                "question": question,
+                "match_count": len(matches),
+                "results": matches,
+            },
+            status=status.HTTP_200_OK,
         )

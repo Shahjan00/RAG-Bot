@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from .models import Document, DocumentChunk
+from .services.embedding import generate_embedding
 from .services.rag_pipeline import (
     chunk_text,
     extract_text_from_file,
@@ -35,6 +36,7 @@ class DocumentUploadSerializer(serializers.ModelSerializer):
                     document=document,
                     chunk_index=index,
                     chunk_text=chunk,
+                    embedding=generate_embedding(chunk),
                 )
         except Exception as exc:
             document.uploaded_file.delete(save=False)
@@ -44,3 +46,8 @@ class DocumentUploadSerializer(serializers.ModelSerializer):
             )
 
         return document
+
+
+class QuestionSearchSerializer(serializers.Serializer):
+    question = serializers.CharField()
+    top_k = serializers.IntegerField(required=False, min_value=1, max_value=20, default=5)
