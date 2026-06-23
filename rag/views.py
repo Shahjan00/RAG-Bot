@@ -20,6 +20,7 @@ class DocumentUploadView(APIView):
                 "document_id": document.id,
                 "business_id": document.business_id,
                 "title": document.title,
+                "chunk_count": document.chunks.count(),
             },
             status=status.HTTP_201_CREATED,
         )
