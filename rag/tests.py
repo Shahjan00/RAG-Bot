@@ -3,8 +3,12 @@ from unittest import TestCase
 from unittest.mock import patch
 
 import numpy as np
+from django.test import SimpleTestCase
+from rest_framework.test import APIRequestFactory
 
+from rag.services.ai_insights import build_chat_prompt, generate_chat_answer
 from rag.services.vector_store import build_faiss_index, search_similar_chunks
+from rag.views import ChatView
 
 
 class FakeIndexFlatIP:
@@ -92,3 +96,75 @@ class VectorStoreTests(TestCase):
         self.assertIsNotNone(index)
         self.assertEqual(len(indexed_chunks), 1)
         self.assertEqual(indexed_chunks[0].chunk_text, "Valid")
+
+
+class ChatFlowTests(SimpleTestCase):
+    def test_build_chat_prompt_includes_question_and_context(self):
+        chunks = [
+            {
+                "document_title": "Policy.pdf",
+                "chunk_index": 0,
+                "chunk_text": "Refunds are allowed within 30 days.",
+            }
+        ]
+
+        prompt = build_chat_prompt("What is the refund policy?", chunks)
+
+        self.assertIn("Question: What is the refund policy?", prompt)
+        self.assertIn("Document: Policy.pdf", prompt)
+        self.assertIn("Refunds are allowed within 30 days.", prompt)
+
+    @patch("rag.services.ai_insights.search_similar_chunks")
+    @patch("rag.services.ai_insights.OpenAI")
+    def test_generate_chat_answer_uses_retrieved_chunks(self, mock_openai_class, mock_search):
+        mock_search.return_value = [
+            {
+                "chunk_id": 1,
+                "document_id": 2,
+                "document_title": "Policy.pdf",
+                "chunk_index": 0,
+                "chunk_text": "Refunds are allowed within 30 days.",
+                "score": 0.95,
+            }
+        ]
+        mock_client = mock_openai_class.return_value
+        mock_client.responses.create.return_value = SimpleNamespace(
+            output_text="The refund policy allows refunds within 30 days."
+        )
+
+        result = generate_chat_answer("What is the refund policy?")
+
+        self.assertEqual(
+            result["answer"],
+            "The refund policy allows refunds within 30 days.",
+        )
+        self.assertEqual(result["match_count"], 1)
+        self.assertEqual(result["results"][0]["chunk_id"], 1)
+
+    @patch("rag.views.generate_chat_answer")
+    def test_chat_view_returns_answer(self, mock_generate_chat_answer):
+        mock_generate_chat_answer.return_value = {
+            "question": "What is the refund policy?",
+            "answer": "Refunds are allowed within 30 days.",
+            "match_count": 1,
+            "results": [
+                {
+                    "chunk_id": 1,
+                    "document_id": 2,
+                    "document_title": "Policy.pdf",
+                    "chunk_index": 0,
+                    "chunk_text": "Refunds are allowed within 30 days.",
+                    "score": 0.95,
+                }
+            ],
+        }
+        request = APIRequestFactory().post(
+            "/api/chat/",
+            {"question": "What is the refund policy?"},
+            format="json",
+        )
+
+        response = ChatView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["answer"], "Refunds are allowed within 30 days.")

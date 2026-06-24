@@ -51,3 +51,8 @@ class DocumentUploadSerializer(serializers.ModelSerializer):
 class QuestionSearchSerializer(serializers.Serializer):
     question = serializers.CharField()
     top_k = serializers.IntegerField(required=False, min_value=1, max_value=20, default=5)
+
+
+class ChatRequestSerializer(serializers.Serializer):
+    question = serializers.CharField()
+    top_k = serializers.IntegerField(required=False, min_value=1, max_value=20, default=5)

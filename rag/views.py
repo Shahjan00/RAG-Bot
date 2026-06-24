@@ -3,7 +3,12 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .serializers import DocumentUploadSerializer, QuestionSearchSerializer
+from .serializers import (
+    ChatRequestSerializer,
+    DocumentUploadSerializer,
+    QuestionSearchSerializer,
+)
+from .services.ai_insights import generate_chat_answer
 from .services.vector_store import search_similar_chunks
 
 
@@ -44,3 +49,15 @@ class QuestionSearchView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class ChatView(APIView):
+    def post(self, request):
+        serializer = ChatRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        question = serializer.validated_data["question"]
+        top_k = serializer.validated_data["top_k"]
+        result = generate_chat_answer(question, top_k=top_k)
+
+        return Response(result, status=status.HTTP_200_OK)
