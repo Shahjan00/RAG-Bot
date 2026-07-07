@@ -24,13 +24,13 @@ class DocumentUploadView(APIView):
 
         return Response(
             {
-                "message": "Document uploaded successfully.",
+                "message": "Document uploaded. Processing started in background.",
                 "document_id": document.id,
                 "business_id": document.business_id,
                 "title": document.title,
-                "chunk_count": document.chunks.count(),
+                "processing_status": document.processing_status,
             },
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_202_ACCEPTED,
         )
 
 

@@ -1,20 +1,25 @@
+from django.db import transaction
 from rest_framework import serializers
 
-from .models import Document, DocumentChunk
-from .services.embedding import generate_embedding
-from .services.rag_pipeline import (
-    chunk_text,
-    extract_text_from_file,
-    get_allowed_extensions_text,
-    is_supported_file,
-)
+from .models import Document
+from .services.rag_pipeline import get_allowed_extensions_text, is_supported_file
+from .tasks import process_document_upload
 
 
 class DocumentUploadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Document
-        fields = ["id", "business", "title", "uploaded_file", "extracted_text", "uploaded_at"]
-        read_only_fields = ["id", "extracted_text", "uploaded_at"]
+        fields = [
+            "id",
+            "business",
+            "title",
+            "uploaded_file",
+            "extracted_text",
+            "processing_status",
+            "processing_error",
+            "uploaded_at",
+        ]
+        read_only_fields = ["id", "extracted_text", "processing_status", "processing_error", "uploaded_at"]
 
     def validate_uploaded_file(self, value):
         if not is_supported_file(value.name):
@@ -24,27 +29,13 @@ class DocumentUploadSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        document = Document.objects.create(extracted_text="", **validated_data)
-
-        try:
-            document.extracted_text = extract_text_from_file(document.uploaded_file.path)
-            document.save(update_fields=["extracted_text"])
-
-            chunks = chunk_text(document.extracted_text, chunk_size=500, overlap=50)
-            for index, chunk in enumerate(chunks):
-                DocumentChunk.objects.create(
-                    document=document,
-                    chunk_index=index,
-                    chunk_text=chunk,
-                    embedding=generate_embedding(chunk),
-                )
-        except Exception as exc:
-            document.uploaded_file.delete(save=False)
-            document.delete()
-            raise serializers.ValidationError(
-                {"uploaded_file": f"Could not extract text from this file. {exc}"}
-            )
-
+        document = Document.objects.create(
+            extracted_text="",
+            processing_status=Document.STATUS_PENDING,
+            processing_error="",
+            **validated_data,
+        )
+        transaction.on_commit(lambda: process_document_upload.delay(document.id))
         return document
 
 

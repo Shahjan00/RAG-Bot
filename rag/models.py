@@ -17,6 +17,18 @@ class Business(models.Model):
 
 
 class Document(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_PROCESSING = "processing"
+    STATUS_COMPLETED = "completed"
+    STATUS_FAILED = "failed"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_PROCESSING, "Processing"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
     business = models.ForeignKey(
         Business,
         on_delete=models.CASCADE,
@@ -25,6 +37,12 @@ class Document(models.Model):
     title = models.CharField(max_length=255)
     uploaded_file = models.FileField(upload_to="documents/")
     extracted_text = models.TextField(blank=True)
+    processing_status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+    processing_error = models.TextField(blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

@@ -6,8 +6,10 @@ import numpy as np
 from django.test import SimpleTestCase, override_settings
 from rest_framework.test import APIRequestFactory
 
+from rag.models import Document
 from rag.services.ai_insights import build_chat_prompt, generate_chat_answer
 from rag.services.vector_store import _get_chunk_source, build_faiss_index, search_similar_chunks
+from rag.tasks import process_document_upload
 from rag.views import ChatView, QuestionSearchView, WidgetSnippetView
 
 
@@ -113,6 +115,29 @@ class VectorStoreTests(TestCase):
 
 
 class ChatFlowTests(SimpleTestCase):
+    @patch("rag.serializers.transaction.on_commit")
+    def test_document_upload_serializer_queues_task(self, mock_on_commit):
+        serializer = __import__("rag.serializers", fromlist=["DocumentUploadSerializer"]).DocumentUploadSerializer()
+        validated_data = {
+            "business": SimpleNamespace(),
+            "title": "Guide.pdf",
+            "uploaded_file": SimpleNamespace(),
+        }
+
+        with patch("rag.serializers.Document.objects.create") as mock_create:
+            document = SimpleNamespace(
+                id=5,
+                processing_status=Document.STATUS_PENDING,
+                business_id=1,
+                title="Guide.pdf",
+            )
+            mock_create.return_value = document
+
+            result = serializer.create(validated_data)
+
+        self.assertEqual(result, document)
+        mock_on_commit.assert_called_once()
+
     def test_build_chat_prompt_includes_question_and_context(self):
         chunks = [
             {
@@ -236,3 +261,54 @@ class ChatFlowTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+
+
+class DocumentTaskTests(SimpleTestCase):
+    @patch("rag.tasks.generate_embedding", return_value=[1.0, 0.0])
+    @patch("rag.tasks.chunk_text", return_value=["chunk one", "chunk two"])
+    @patch("rag.tasks.extract_text_from_file", return_value="document text")
+    @patch("rag.tasks.DocumentChunk.objects.create")
+    @patch("rag.tasks.Document.objects.get")
+    def test_process_document_upload_completes_document(
+        self,
+        mock_get_document,
+        mock_create_chunk,
+        _mock_extract_text,
+        _mock_chunk_text,
+        _mock_generate_embedding,
+    ):
+        document = SimpleNamespace(
+            id=10,
+            uploaded_file=SimpleNamespace(path="/tmp/test.pdf"),
+            extracted_text="",
+            processing_status=Document.STATUS_PENDING,
+            processing_error="",
+            chunks=SimpleNamespace(all=lambda: SimpleNamespace(delete=lambda: None)),
+        )
+        document.save = MagicMock()
+        mock_get_document.return_value = document
+
+        process_document_upload(10)
+
+        self.assertEqual(document.processing_status, Document.STATUS_COMPLETED)
+        self.assertEqual(document.extracted_text, "document text")
+        self.assertEqual(mock_create_chunk.call_count, 2)
+
+    @patch("rag.tasks.extract_text_from_file", side_effect=ValueError("bad pdf"))
+    @patch("rag.tasks.Document.objects.get")
+    def test_process_document_upload_marks_failed(self, mock_get_document, _mock_extract_text):
+        document = SimpleNamespace(
+            id=10,
+            uploaded_file=SimpleNamespace(path="/tmp/test.pdf"),
+            extracted_text="",
+            processing_status=Document.STATUS_PENDING,
+            processing_error="",
+            chunks=SimpleNamespace(all=lambda: SimpleNamespace(delete=lambda: None)),
+        )
+        document.save = MagicMock()
+        mock_get_document.return_value = document
+
+        process_document_upload(10)
+
+        self.assertEqual(document.processing_status, Document.STATUS_FAILED)
+        self.assertEqual(document.processing_error, "bad pdf")
