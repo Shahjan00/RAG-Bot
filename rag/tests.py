@@ -3,12 +3,12 @@ from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-from django.test import SimpleTestCase
+from django.test import SimpleTestCase, override_settings
 from rest_framework.test import APIRequestFactory
 
 from rag.services.ai_insights import build_chat_prompt, generate_chat_answer
 from rag.services.vector_store import _get_chunk_source, build_faiss_index, search_similar_chunks
-from rag.views import ChatView, QuestionSearchView
+from rag.views import ChatView, QuestionSearchView, WidgetSnippetView
 
 
 class FakeIndexFlatIP:
@@ -203,3 +203,36 @@ class ChatFlowTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.data["detail"], "Valid X-API-Key header is required.")
+
+    @override_settings(ALLOWED_HOSTS=["testserver"])
+    @patch("rag.views.get_request_business")
+    def test_widget_snippet_view_returns_script_tag(self, mock_get_request_business):
+        mock_get_request_business.return_value = SimpleNamespace(id=2, api_key="abc123")
+        request = APIRequestFactory().get("/api/widget/snippet/")
+
+        response = WidgetSnippetView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("<script", response.data["script_tag"])
+        self.assertIn('data-api-key="abc123"', response.data["script_tag"])
+
+    @patch("rag.views.get_request_business")
+    @patch("rag.views.generate_chat_answer")
+    def test_chat_view_adds_cors_header(self, mock_generate_chat_answer, mock_get_request_business):
+        mock_get_request_business.return_value = SimpleNamespace(id=2)
+        mock_generate_chat_answer.return_value = {
+            "question": "Hello",
+            "answer": "Hi",
+            "match_count": 0,
+            "results": [],
+        }
+        request = APIRequestFactory().post(
+            "/api/chat/",
+            {"question": "Hello", "api_key": "abc123"},
+            format="json",
+        )
+
+        response = ChatView.as_view()(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "*")
