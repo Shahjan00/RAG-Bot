@@ -27,8 +27,8 @@ def build_chat_prompt(question, chunks):
     )
 
 
-def generate_chat_answer(question, top_k=5):
-    chunks = search_similar_chunks(question, limit=top_k)
+def generate_chat_answer(question, business, top_k=5):
+    chunks = search_similar_chunks(question, limit=top_k, business=business)
     prompt = build_chat_prompt(question, chunks)
 
     client = OpenAI(api_key=settings.OPENAI_API_KEY)

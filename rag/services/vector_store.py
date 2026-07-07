@@ -29,21 +29,26 @@ def _normalize_embedding(embedding):
     return vector
 
 
-def _get_chunk_source(chunks=None):
+def _get_chunk_source(chunks=None, business=None):
     if chunks is not None:
         return chunks
 
-    return DocumentChunk.objects.select_related("document").order_by("id")
+    queryset = DocumentChunk.objects.select_related("document").order_by("id")
+
+    if business is not None:
+        queryset = queryset.filter(document__business=business)
+
+    return queryset
 
 
-def build_faiss_index(chunks=None):
+def build_faiss_index(chunks=None, business=None):
     _require_faiss()
 
     valid_chunks = []
     vectors = []
     dimension = None
 
-    for chunk in _get_chunk_source(chunks):
+    for chunk in _get_chunk_source(chunks=chunks, business=business):
         vector = _normalize_embedding(getattr(chunk, "embedding", None))
         if vector is None:
             continue
@@ -69,10 +74,10 @@ def build_faiss_index(chunks=None):
     return index, valid_chunks
 
 
-def search_similar_chunks(question, limit=5, chunks=None):
+def search_similar_chunks(question, limit=5, chunks=None, business=None):
     _require_faiss()
 
-    index, indexed_chunks = build_faiss_index(chunks=chunks)
+    index, indexed_chunks = build_faiss_index(chunks=chunks, business=business)
     if index is None:
         return []
 

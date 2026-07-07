@@ -1,14 +1,14 @@
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 from django.test import SimpleTestCase
 from rest_framework.test import APIRequestFactory
 
 from rag.services.ai_insights import build_chat_prompt, generate_chat_answer
-from rag.services.vector_store import build_faiss_index, search_similar_chunks
-from rag.views import ChatView
+from rag.services.vector_store import _get_chunk_source, build_faiss_index, search_similar_chunks
+from rag.views import ChatView, QuestionSearchView
 
 
 class FakeIndexFlatIP:
@@ -97,6 +97,20 @@ class VectorStoreTests(TestCase):
         self.assertEqual(len(indexed_chunks), 1)
         self.assertEqual(indexed_chunks[0].chunk_text, "Valid")
 
+    @patch("rag.services.vector_store.DocumentChunk.objects")
+    def test_get_chunk_source_filters_by_business(self, mock_objects):
+        business = SimpleNamespace(id=7)
+        ordered_queryset = MagicMock()
+        filtered_queryset = MagicMock()
+
+        mock_objects.select_related.return_value.order_by.return_value = ordered_queryset
+        ordered_queryset.filter.return_value = filtered_queryset
+
+        result = _get_chunk_source(business=business)
+
+        ordered_queryset.filter.assert_called_once_with(document__business=business)
+        self.assertEqual(result, filtered_queryset)
+
 
 class ChatFlowTests(SimpleTestCase):
     def test_build_chat_prompt_includes_question_and_context(self):
@@ -117,6 +131,7 @@ class ChatFlowTests(SimpleTestCase):
     @patch("rag.services.ai_insights.search_similar_chunks")
     @patch("rag.services.ai_insights.OpenAI")
     def test_generate_chat_answer_uses_retrieved_chunks(self, mock_openai_class, mock_search):
+        business = SimpleNamespace(id=2)
         mock_search.return_value = [
             {
                 "chunk_id": 1,
@@ -132,7 +147,7 @@ class ChatFlowTests(SimpleTestCase):
             output_text="The refund policy allows refunds within 30 days."
         )
 
-        result = generate_chat_answer("What is the refund policy?")
+        result = generate_chat_answer("What is the refund policy?", business=business)
 
         self.assertEqual(
             result["answer"],
@@ -140,9 +155,16 @@ class ChatFlowTests(SimpleTestCase):
         )
         self.assertEqual(result["match_count"], 1)
         self.assertEqual(result["results"][0]["chunk_id"], 1)
+        mock_search.assert_called_once_with(
+            "What is the refund policy?",
+            limit=5,
+            business=business,
+        )
 
     @patch("rag.views.generate_chat_answer")
-    def test_chat_view_returns_answer(self, mock_generate_chat_answer):
+    @patch("rag.views.get_request_business")
+    def test_chat_view_returns_answer(self, mock_get_request_business, mock_generate_chat_answer):
+        mock_get_request_business.return_value = SimpleNamespace(id=2)
         mock_generate_chat_answer.return_value = {
             "question": "What is the refund policy?",
             "answer": "Refunds are allowed within 30 days.",
@@ -168,3 +190,16 @@ class ChatFlowTests(SimpleTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data["answer"], "Refunds are allowed within 30 days.")
+        self.assertEqual(response.data["business_id"], 2)
+
+    def test_search_view_requires_api_key(self):
+        request = APIRequestFactory().post(
+            "/api/search/",
+            {"question": "What is the refund policy?"},
+            format="json",
+        )
+
+        response = QuestionSearchView.as_view()(request)
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.data["detail"], "Valid X-API-Key header is required.")

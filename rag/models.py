@@ -1,8 +1,15 @@
+import uuid
+
 from django.db import models
+
+
+def generate_api_key():
+    return uuid.uuid4().hex
 
 
 class Business(models.Model):
     name = models.CharField(max_length=255)
+    api_key = models.CharField(max_length=32, unique=True, default=generate_api_key, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
